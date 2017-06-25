@@ -1,4 +1,4 @@
-package variance.test
+package impatient.scala.chapter17.test
 
 /**
   * Created by wpy on 2017/6/23.

@@ -1,5 +1,7 @@
 package impatient.scala.chapter17.test
 
+import org.scalatest.FunSuite
+
 /**
   * Created by wpy on 2017/6/23.
   */
@@ -34,6 +36,12 @@ class Student(name: String) extends Person(name)
 
 trait Friend[-T] {
   def beFriends(someone: T)
+}
+
+class TestPos extends FunSuite {
+
+  test("position") {
+  }
 }
 
 

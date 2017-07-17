@@ -24,7 +24,7 @@ import scala.collection.mutable.ArrayBuffer
 /**
   * Created by wangpengyu6 on 2017/7/15.
   */
-private[hikvision] class HBaseRDD(sc: SparkContext,
+class HBaseRDD(sc: SparkContext,
                                   tableNameString: String,
                                   configuration: SerializableConfiguration,
                                   size: Long) extends RDD[(ImmutableBytesWritable, Result)](sc, Nil) {

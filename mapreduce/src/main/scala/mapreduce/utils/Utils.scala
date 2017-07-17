@@ -2,12 +2,14 @@ package mapreduce.utils
 
 import java.io.IOException
 
+import org.apache.spark.internal.Logging
+
 import scala.util.control.NonFatal
 
 /**
  * Various utility methods used by Ude.Copy from spark Utils.scala
  */
-private[hikvision] object Utils extends Logging{
+object Utils extends Logging{
     /**
      * Get the ClassLoader which loaded Spark.
      */

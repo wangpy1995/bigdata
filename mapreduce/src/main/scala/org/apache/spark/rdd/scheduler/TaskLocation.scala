@@ -43,14 +43,15 @@ private object TaskLocation {
   }
 }
 
-private[hikvision] case class ExecutorCacheTaskLocation(override val host: String, executorId: String)
+case class ExecutorCacheTaskLocation(override val host: String, executorId: String)
   extends TaskLocation {
   override def toString: String = s"${TaskLocation.executorLocationTag}${host}_$executorId"
 }
-private[hikvision] case class HDFSCacheTaskLocation(override val host: String) extends TaskLocation {
+
+case class HDFSCacheTaskLocation(override val host: String) extends TaskLocation {
   override def toString: String = TaskLocation.inMemoryLocationTag + host
 }
 
-private[hikvision] case class HostTaskLocation(override val host: String) extends TaskLocation {
+case class HostTaskLocation(override val host: String) extends TaskLocation {
   override def toString: String = host
 }

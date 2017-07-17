@@ -4,6 +4,7 @@ import org.apache.hadoop.hbase.client.Scan
 import org.apache.hadoop.hbase.protobuf.ProtobufUtil
 import org.apache.hadoop.hbase.protobuf.generated.ClientProtos
 import org.apache.hadoop.hbase.util.Base64
+import org.apache.spark.internal.Logging
 
 /**
   * Created by wangpengyu6 on 2017/7/17.

@@ -2,12 +2,13 @@ package mapreduce.utils.serializable
 
 import java.io.{ObjectInputStream, ObjectOutputStream}
 
+import mapreduce.utils.Utils
 import org.apache.hadoop.conf.Configuration
 
 /**
   * Created by wangpengyu6 on 2017/7/17.
   */
-private[hikvision] class SerializableConfiguration(@transient var value: Configuration) extends Serializable {
+private[mapreduce] class SerializableConfiguration(@transient var value: Configuration) extends Serializable {
   private def writeObject(out: ObjectOutputStream): Unit = Utils.tryOrIOException {
     out.defaultWriteObject()
     value.write(out)

@@ -4,16 +4,19 @@ import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.{Date, Locale}
 
+import mapreduce.utils.HBaseUtils
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.hbase.client.{ConnectionFactory, Result, Scan}
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable
-import org.apache.hadoop.hbase.mapreduce.{TableInputFormatBase, TableMapReduceUtil, TableRecordReader, TableSplit}
+import org.apache.hadoop.hbase.mapreduce.{TableInputFormat, TableInputFormatBase, TableRecordReader, TableSplit}
 import org.apache.hadoop.hbase.util.{Bytes, RegionSizeCalculator}
 import org.apache.hadoop.hbase.{HConstants, TableName}
 import org.apache.hadoop.mapred.JobConf
-import org.apache.hadoop.mapreduce.task.TaskAttemptContextImpl
 import org.apache.hadoop.mapreduce._
+import org.apache.hadoop.mapreduce.task.TaskAttemptContextImpl
 import org.apache.spark._
+import org.apache.spark.internal.Logging
+import org.apache.spark.rdd.scheduler.{HDFSCacheTaskLocation, HostTaskLocation, SplitInfoReflections}
 import org.apache.spark.util.SerializableConfiguration
 
 import scala.collection.mutable.ArrayBuffer
@@ -21,32 +24,23 @@ import scala.collection.mutable.ArrayBuffer
 /**
   * Created by wangpengyu6 on 2017/7/15.
   */
-class HBaseRDD(sc: SparkContext,
-               tableNameString: String,
-               configuration: SerializableConfiguration,
-               s: String, size: Long) extends RDD[(ImmutableBytesWritable, Result)](sc, Nil) {
+private[hikvision] class HBaseRDD(sc: SparkContext,
+                                  tableNameString: String,
+                                  configuration: SerializableConfiguration,
+                                  size: Long) extends RDD[(ImmutableBytesWritable, Result)](sc, Nil) {
   var tableRecordReader: TableRecordReader = _
   private val confBroadcast = sc.broadcast(configuration)
   private val jobTrackerId: String = {
     val formatter = new SimpleDateFormat("yyyyMMddHHmmss", Locale.US)
     formatter.format(new Date())
   }
-  private val shouldCloneJobConf = sparkContext.conf.getBoolean("spark.hadoop.cloneConf", false)
+  private val shouldCloneJobConf = sparkContext.getConf.getBoolean("spark.hadoop.cloneConf", false)
 
   def getConf: Configuration = {
     val conf: Configuration = confBroadcast.value.value
     if (shouldCloneJobConf) {
-      // Hadoop Configuration objects are not thread-safe, which may lead to various problems if
-      // one job modifies a configuration while another reads it (SPARK-2546, SPARK-10611).  This
-      // problem occurs somewhat rarely because most jobs treat the configuration as though it's
-      // immutable.  One solution, implemented here, is to clone the Configuration object.
-      // Unfortunately, this clone can be very expensive.  To avoid unexpected performance
-      // regressions for workloads and Hadoop versions that do not suffer from these thread-safety
-      // issues, this cloning is disabled by default.
-      NewHadoopRDD.CONFIGURATION_INSTANTIATION_LOCK.synchronized {
+      HBaseRDD.CONFIGURATION_INSTANTIATION_LOCK.synchronized {
         logDebug("Cloning Hadoop Configuration")
-        // The Configuration passed in is actually a JobConf and possibly contains credentials.
-        // To keep those credentials properly we have to create a new JobConf not a Configuration.
         if (conf.isInstanceOf[JobConf]) {
           new JobConf(conf)
         } else {
@@ -58,17 +52,17 @@ class HBaseRDD(sc: SparkContext,
     }
   }
 
-  def createRecordReader(tSplit: TableSplit) = {
+  private def createRecordReader(tSplit: TableSplit) = {
     val tableName = TableName.valueOf(tableNameString)
     val conf = configuration.value
     val conn = ConnectionFactory.createConnection(conf)
     val table = conn.getTable(tableName)
     val trr = if (this.tableRecordReader != null) this.tableRecordReader
     else new TableRecordReader
-    val sc = new Scan(TableMapReduceUtil.convertStringToScan(s))
-    sc.withStartRow(tSplit.getStartRow)
-    sc.withStopRow(tSplit.getEndRow)
-    logInfo(s"Scan: $sc, table: $table")
+    val sc = new Scan(HBaseUtils.convertStringToScan(conf.get(TableInputFormat.SCAN)))
+    sc.setStartRow(tSplit.getStartRow)
+    sc.setStopRow(tSplit.getEndRow)
+    logDebug(s"Scan: $sc, table: $table")
     trr.setScan(sc)
     trr.setTable(table)
     new RecordReader[ImmutableBytesWritable, Result]() {
@@ -166,7 +160,8 @@ class HBaseRDD(sc: SparkContext,
     val tableName = TableName.valueOf(tableNameString)
     val conf = configuration.value
     val conn = ConnectionFactory.createConnection(conf)
-    val scan = TableMapReduceUtil.convertStringToScan(s)
+    //    val scan = HBaseUtils.convertStringToScan(s)
+    val scan = new Scan(HBaseUtils.convertStringToScan(conf.get(TableInputFormat.SCAN)))
     val isText = conn.getConfiguration.getBoolean(TableInputFormatBase.TABLE_ROW_TEXTKEY, true)
     val admin = conn.getAdmin
     val regionLocator = conn.getRegionLocator(tableName)
@@ -209,13 +204,14 @@ class HBaseRDD(sc: SparkContext,
       splitPair.foreach { indexPair =>
         val splitStart = indexPair._1
         val splitStop = indexPair._2
+        logDebug(s"split region: ============>(${Bytes.toString(splitStart)},${Bytes.toString(splitStop)})<============")
         val regionLocation = regionLocator.getRegionLocation(splitStart)
         val regionSize = regionSizeCalculator.getRegionSize(regionLocation.getRegionInfo.getRegionName)
         if (regionSize > size) {
           val num = (regionSize / size).toInt
           val splitKeys = getSplitKey(splitStart, splitStop, num, isText)
-
           for (i <- 0 until splitKeys.length - 1) {
+            logDebug(s"splitKey_$index: ------------>(${splitKeys(i).map(_.toChar).mkString},${splitKeys(i + 1).map(_.toChar).mkString})<------------")
             parts += HBaseRegionPartition(index, new TableSplit(
               tableName,
               scan,
@@ -228,6 +224,7 @@ class HBaseRDD(sc: SparkContext,
           }
         }
         else {
+          logDebug(s"SPLIT NO NEED:(${Bytes.toString(splitStart)}, ${Bytes.toString(splitStop)})")
           parts += HBaseRegionPartition(index, new TableSplit(tableName,
             scan,
             splitStart,
@@ -242,7 +239,7 @@ class HBaseRDD(sc: SparkContext,
     }
   }
 
-  def getSplitKey(start: Array[Byte], end: Array[Byte], num: Int, isText: Boolean): Array[Array[Byte]] = {
+  private def getSplitKey(start: Array[Byte], end: Array[Byte], num: Int, isText: Boolean): Array[Array[Byte]] = {
     val splitKeys = new ArrayBuffer[Array[Byte]]()
     val (upperLimitByte, lowerLimitByte): (Byte, Byte) = if (isText) ('~', ' ') else (-1, 0)
     // For special case
@@ -251,8 +248,11 @@ class HBaseRDD(sc: SparkContext,
     if (start.length == 0 && end.length == 0)
       for (i <- 1 to num)
         splitKeys += Array[Byte](((lowerLimitByte + upperLimitByte) / i).toByte)
-    else if (start.length == 0 && end.length != 0) for (i <- 1 to num) splitKeys += Array((end(0) / i).toByte)
+    else if (start.length == 0 && end.length != 0)
+      for (i <- 1 to num)
+        splitKeys += Array((end(0) / i).toByte)
     else if (start.length != 0 && end.length == 0) {
+      splitKeys += start
       for (i <- 1 to num) {
         val result = new Array[Byte](start.length)
         result(0) = (start(0) / i).toByte
@@ -261,8 +261,68 @@ class HBaseRDD(sc: SparkContext,
       }
     }
     else Bytes.split(start, end, false, num).foreach(splitKeys += _)
+    /* if (Bytes.compareTo(splitKeys.last, end) < 0)
+       splitKeys += end*/
     splitKeys.toArray
   }
+
+  override def getPreferredLocations(hsplit: Partition): Seq[String] = {
+    val split = hsplit.asInstanceOf[HBaseRegionPartition].serializableHadoopSplit.value
+    val locs = HBaseRDD.SPLIT_INFO_REFLECTIONS match {
+      case Some(c) =>
+        try {
+          val infos = c.newGetLocationInfo.invoke(split).asInstanceOf[Array[AnyRef]]
+          HBaseRDD.convertSplitLocationInfo(infos)
+        } catch {
+          case e: Exception =>
+            logDebug("Failed to use InputSplit#getLocationInfo.", e)
+            None
+        }
+      case None => None
+    }
+    locs.getOrElse(split.getLocations.filter(_ != "localhost"))
+  }
+}
+
+
+object HBaseRDD extends Logging {
+  private val SPLIT_INFO_REFLECTIONS: Option[SplitInfoReflections] = try {
+    Some(new SplitInfoReflections)
+  } catch {
+    case e: Exception =>
+      logDebug("SplitLocationInfo and other new Hadoop classes are " +
+        "unavailable. Using the older Hadoop location info code.", e)
+      None
+  }
+  private val CONFIGURATION_INSTANTIATION_LOCK = new Object()
+
+  private def convertSplitLocationInfo(infos: Array[AnyRef]): Option[Seq[String]] = {
+    Option(infos).map(_.flatMap { loc =>
+      val reflections = HBaseRDD.SPLIT_INFO_REFLECTIONS.get
+      val locationStr = reflections.getLocation.invoke(loc).asInstanceOf[String]
+      if (locationStr != "localhost") {
+        if (reflections.isInMemory.invoke(loc).asInstanceOf[Boolean]) {
+          logDebug(s"Partition $locationStr is cached by Hadoop.")
+          Some(HDFSCacheTaskLocation(locationStr).toString)
+        } else {
+          Some(HostTaskLocation(locationStr).toString)
+        }
+      } else {
+        None
+      }
+    })
+  }
+
+  def create(sc: SparkContext,
+             tableName: String,
+             conf: Configuration,
+             size: Long): HBaseRDD = {
+    new HBaseRDD(sc, tableName,
+      new SerializableConfiguration(conf),
+      size)
+  }
+
+
 }
 
 case class HBaseRegionPartition(index: Int, @transient split: TableSplit) extends Partition {

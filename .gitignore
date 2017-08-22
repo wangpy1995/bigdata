@@ -4,3 +4,7 @@
 将删除 mapreduce/
 将删除 out/
 将删除 test/
+将删除 mapreduce/${project.basedir}/
+将删除 mapreduce/mapreduce.iml
+将删除 mapreduce/src/test/scala/impatient/scala/chapter18/test/IterableA.scala
+将删除 mapreduce/target/

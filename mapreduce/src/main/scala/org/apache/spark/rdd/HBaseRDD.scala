@@ -322,7 +322,6 @@ object HBaseRDD extends Logging {
       size)
   }
 
-
 }
 
 case class HBaseRegionPartition(index: Int, @transient split: TableSplit) extends Partition {

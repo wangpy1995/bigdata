@@ -1,5 +1,9 @@
 package impatient.scala.chapter17.test
 
+import java.io._
+
+import org.apache.hadoop.hbase.mapreduce.TableSplit
+import org.apache.spark.SerializableWritable
 import org.scalatest.FunSuite
 
 /**
@@ -42,6 +46,23 @@ class TestPos extends FunSuite {
 
   test("position") {
   }
+
+  test("serialize") {
+    //    val tableSplit = new TableSplit(TableName.valueOf("serializableWritable"),
+    //      new Scan(),
+    //      Bytes.toBytes("start"),
+    //      Bytes.toBytes("end"),"local")
+    //    val part = HBaseRegionPartition(1,tableSplit)
+
+    //    val split = part.serializableHadoopSplit
+    val file = new File("serialize")
+    //    if(!file.exists())file.createNewFile()
+    val in = new FileInputStream(file)
+    //    val out = new FileOutputStream(file)
+    //    new ObjectOutputStream(out).writeObject(split)
+
+    val tableSplit = new ObjectInputStream(in).readObject().asInstanceOf[SerializableWritable[TableSplit]].value
+    println(tableSplit)
+    in.close()
+  }
 }
-
-

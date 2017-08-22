@@ -1,10 +1,12 @@
-package org.apache.spark
+package org.apache.spark.sql
 
+import org.apache.arrow.memory.RootAllocator
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.hbase.client.{ConnectionFactory, Put, Scan}
-import org.apache.hadoop.hbase.mapreduce.{TableMapReduceUtil, TableRecordReader}
+import org.apache.hadoop.hbase.mapreduce.{RowCounter, TableRecordReader}
 import org.apache.hadoop.hbase.util.Bytes
-import org.apache.hadoop.hbase.{HBaseConfiguration, TableName}
+import org.apache.hadoop.hbase.{CellUtil, HBaseConfiguration, TableName}
+import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.rdd.HBaseRDD
 import org.apache.spark.util.SerializableConfiguration
 import org.scalatest.{BeforeAndAfter, FunSuite}
@@ -23,10 +25,13 @@ class HBaseRddTestSuit extends FunSuite with BeforeAndAfter {
   val admin = conn.getAdmin
   val tableName = TableName.valueOf("wpy1:test")
   test("hbase rdd") {
-    val scan = TableMapReduceUtil.convertScanToString(new Scan())
+    //    val scan = TableMapReduceUtil.convertScanToString(new Scan())
+    val job =
+      RowCounter.createSubmittableJob(new Configuration(), Array("wpy1:test"))
     //    val c = sc.broadcast(conf)
-    val rdd = new HBaseRDD(sc, "wpy1:test", configuration, scan, 100 * 1000 * 1000)
-    val pars = rdd.partitions
+    val rdd = new HBaseRDD(sc, "wpy1:test", new SerializableConfiguration(job.getConfiguration), 100 * 1000 * 1000)
+    val buf = new RootAllocator(Int.MaxValue).buffer(2048)
+    val pars = rdd.zipWithIndex().map(cell => cell._1._2.rawCells().map(c => buf.readBytes(CellUtil.cloneValue(c))))
 
     rdd.foreach(_ => {})
     Console.in.read()

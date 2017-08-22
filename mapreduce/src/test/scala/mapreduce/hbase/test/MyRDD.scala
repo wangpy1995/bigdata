@@ -7,8 +7,8 @@ import org.apache.hadoop.hbase.shaded.protobuf.ProtobufUtil
 import org.apache.hadoop.hbase.util.{Base64, Bytes}
 import org.apache.hadoop.hbase.{CellUtil, HBaseConfiguration}
 import org.apache.spark.internal.Logging
-import org.apache.spark.rdd.{NewHadoopRDD, RDD}
 import org.apache.spark.{Partition, SparkConf, SparkContext, TaskContext}
+import org.apache.spark.rdd.{NewHadoopRDD, RDD}
 
 import scala.collection.mutable.ArrayBuffer
 

@@ -4,6 +4,7 @@ import java.io.{ObjectInputStream, ObjectOutputStream}
 
 import base.data.loader.components.LoadWithConverterComponent
 import base.data.loader.{Converter, Loader}
+import base.data.sources.LoaderRegister
 import base.data.{CacheRDD, HBaseRDD}
 import com.esotericsoftware.kryo.io.{Input, Output}
 import com.esotericsoftware.kryo.{Kryo, KryoSerializable}
@@ -17,7 +18,7 @@ import org.apache.spark.SparkContext
 
 import scala.collection.mutable
 
-class HBaseLoader extends LoadWithConverterComponent[HBaseRDD, CacheRDD]
+class HBaseLoader extends LoadWithConverterComponent[HBaseRDD, CacheRDD] with LoaderRegister
   with Loader with Converter with KryoSerializable with Serializable {
 
   @transient var map = new mutable.HashMap[String, Any]()
@@ -59,4 +60,6 @@ class HBaseLoader extends LoadWithConverterComponent[HBaseRDD, CacheRDD]
   private def writeObject(out: ObjectOutputStream): Unit = {
     out.writeObject(map)
   }
+
+  override def shortName() = "hbase"
 }

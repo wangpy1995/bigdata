@@ -43,9 +43,11 @@ object DataLoader extends Logging {
     val kafka = classOf[KafkaLoader].getCanonicalName
 
     Map(
+      "base.data.hbase" -> hbase,
       "base.data.sources.hbase" -> hbase,
       "base.data.sources.hbase.HBaseLoader" -> hbase,
       "base.data.sources.hbase.DefaultLoader" -> hbase,
+      "base.data.kafka" -> kafka,
       "base.data.sources.kafka" -> kafka,
       "base.data.sources..kafka.KafkaLoader" -> kafka,
       "base.data.sources.kafka.DefaultLoader" -> hbase
@@ -55,7 +57,7 @@ object DataLoader extends Logging {
   def lookupDataLoader(provider: String): Class[_] = {
     val provider1 = backwardCompatibilityMap.getOrElse(provider, provider)
     val provider2 = s"$provider1.DefaultSource"
-    val loader = Thread.currentThread().getContextClassLoader
+    val loader = Option(Thread.currentThread().getContextClassLoader).getOrElse(DataLoader.getClass.getClassLoader)
     val serviceLoader = ServiceLoader.load(classOf[LoaderRegister], loader)
 
     try {

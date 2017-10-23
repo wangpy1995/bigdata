@@ -40,9 +40,8 @@ class LoaderTestSuite extends FunSuite {
   }
 
   test("dataLoader") {
-    val name = new HBaseLoader().getClass.getName
     val ss = SparkSession.builder().config(sparkConf).getOrCreate()
-    val data = DataLoader(ss,name,job.getConfiguration).load()
+    val data = DataLoader(ss,"base.data.sources.hbase",job.getConfiguration).load()
     data
   }
 

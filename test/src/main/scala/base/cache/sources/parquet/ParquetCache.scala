@@ -1,4 +1,4 @@
-package base.cache.parquet
+package base.cache.sources.parquet
 
 import base.cache.Cache
 import base.cache.components.CacheComponent
@@ -17,24 +17,23 @@ class ParquetCache(
                     name: String,
                     path: String,
                     partitionKey: String
-                  ) extends CacheComponent[String, DataFrame] with Cache[String, DataFrame] {
+                  ) extends CacheComponent[String, DataFrame] with Cache {
 
   /**
     *
     * @param key   partition Key
     * @param value table data
     */
-  override def appendData(key: String, value: DataFrame): Unit =
+  override def appendData(key: K, value: V): Unit =
     value.write.mode(SaveMode.Append).partitionBy(partitionKey).parquet(path)
 
 
-  override def unCacheData(key: String): Unit = {
+  override def unCacheData(key: K): Unit = {
     _ss.sessionState.catalog.dropGlobalTempView(name)
     FileSystem.get(Table.conf).delete(new Path(path), true)
   }
 
-
-  override def getData(key: String): Option[DataFrame] = Some(Table.df)
+  override def getData(key: K): Option[V] = Some(Table.df)
 
   object Table extends Logging {
     val df = _ss.read.parquet(path)

@@ -1,10 +1,9 @@
-package base.data.sources.hbase
+package base.data.loader.sources.hbase
 
 import java.io.{ObjectInputStream, ObjectOutputStream}
 
 import base.data.loader.components.LoadWithConverterComponent
 import base.data.loader.{Converter, Loader}
-import base.data.sources.LoaderRegister
 import base.data.{CacheRDD, HBaseRDD}
 import com.esotericsoftware.kryo.io.{Input, Output}
 import com.esotericsoftware.kryo.{Kryo, KryoSerializable}
@@ -18,21 +17,21 @@ import org.apache.spark.SparkContext
 
 import scala.collection.mutable
 
-class HBaseLoader extends LoadWithConverterComponent[HBaseRDD, CacheRDD] with LoaderRegister
+case class HBaseLoader(
+                        _sc: SparkContext,
+                        conf: Configuration) extends LoadWithConverterComponent[HBaseRDD, CacheRDD]
   with Loader with Converter with KryoSerializable with Serializable {
 
   @transient var map = new mutable.HashMap[String, Any]()
-  @transient var _sc: SparkContext = _
 
-  override def doLoad(sc: SparkContext, conf: Configuration): HBaseRDD = {
-    if (_sc == null) _sc = sc
+  override def doLoad(): HBaseRDD = {
     _sc.newAPIHadoopRDD(conf,
       classOf[TableInputFormat],
       classOf[ImmutableBytesWritable],
       classOf[Result])
   }
 
-  override def convert(src: HBaseRDD): CacheRDD = {
+  override def convert[U >: CacheRDD](src: In): U = {
     val bm = _sc.broadcast(map)
     src.mapPartitions { iter =>
       val m = bm.value
@@ -61,5 +60,5 @@ class HBaseLoader extends LoadWithConverterComponent[HBaseRDD, CacheRDD] with Lo
     out.writeObject(map)
   }
 
-  override def shortName() = "hbase"
+  override def loadAs[T]() = loadAndConvert().asInstanceOf[T]
 }

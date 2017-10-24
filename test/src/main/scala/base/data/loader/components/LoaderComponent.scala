@@ -6,7 +6,7 @@ import org.apache.spark.SparkContext
 
 trait LoaderComponent {
   self: Loader =>
-  def load(sc:SparkContext,conf:Configuration): V = self.doLoad(sc,conf)
+  def load(sc: SparkContext, conf: Configuration): V = self.doLoad()
 }
 
 
@@ -16,5 +16,5 @@ trait LoadWithConverterComponent[T, U] {
   override type In = V
   override type Out = U
 
-  def loadAndConvert(sc:SparkContext,conf:Configuration) = self.convert(self.doLoad(sc,conf))
+  def loadAndConvert() = self.convert(self.doLoad())
 }

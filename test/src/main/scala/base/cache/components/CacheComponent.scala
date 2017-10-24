@@ -23,8 +23,11 @@ object CacheModes {
   def Ignore = base.cache.components.Ignore
 }
 
-trait CacheComponent[K, V] {
-  self: Cache[K, V] =>
+trait CacheComponent[T,U] {
+  self: Cache =>
+
+  override type K = T
+  override type V = U
   def cache(key: K, value: V, mode: CacheMode = ErrorIfExists) = mode match {
     case Append =>
       appendData(key, value)

@@ -1,11 +1,10 @@
-package base.data.sources
+package base.data
 
 import java.util.{ServiceConfigurationError, ServiceLoader}
 
-import base.data.loader.{Converter, Loader}
-import base.data.sources.hbase.HBaseLoader
-import base.data.sources.kafka.KafkaLoader
-import org.apache.hadoop.conf.Configuration
+import base.data.loader.sources.hbase.{HBaseLoader, HBaseLoaderCreator}
+import base.data.loader.sources.kafka.{KafkaLoader, KafkaLoaderCreator}
+import base.data.loader.{Converter, Loader, LoaderCreator, LoaderRegister}
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.SparkSession
 
@@ -15,19 +14,26 @@ import scala.util.{Failure, Success, Try}
 case class DataLoader(
                        sparkSession: SparkSession,
                        className: String,
-                       conf: Configuration,
                        paths: Seq[String] = Nil,
                        options: Map[String, String] = Map.empty
                      ) extends Logging {
-
   lazy val providingClass: Class[_] = DataLoader.lookupDataLoader(className)
 
-  def load() = {
+  def resolveLoader: Loader = {
     providingClass.newInstance() match {
+      case l: LoaderCreator =>
+        l.createLoader(sparkSession.sparkContext, options)
+      case _ =>
+        throw new UnsupportedOperationException("only LoaderCreator is supported in this version")
+    }
+  }
+
+  def load[T](): T = {
+    resolveLoader match {
       case lc: Loader with Converter =>
-        lc.convert(lc.doLoad(sparkSession.sparkContext, conf).asInstanceOf[lc.In])
+        lc.loadAs()
       case l: Loader =>
-        l.doLoad(sparkSession.sparkContext, conf)
+        l.loadAs()
       case provider =>
         throw new UnsupportedOperationException(s"not supported providing class[${provider.getClass.getName}]")
     }
@@ -39,18 +45,14 @@ object DataLoader extends Logging {
 
   /** A map to maintain backward compatibility in case we move data sources around. */
   private val backwardCompatibilityMap: Map[String, String] = {
-    val hbase = classOf[HBaseLoader].getCanonicalName
-    val kafka = classOf[KafkaLoader].getCanonicalName
+    val hbase = classOf[HBaseLoaderCreator].getCanonicalName
+    val kafka = classOf[KafkaLoaderCreator].getCanonicalName
 
     Map(
-      "base.data.hbase" -> hbase,
-      "base.data.sources.hbase" -> hbase,
-      "base.data.sources.hbase.HBaseLoader" -> hbase,
-      "base.data.sources.hbase.DefaultLoader" -> hbase,
-      "base.data.kafka" -> kafka,
-      "base.data.sources.kafka" -> kafka,
-      "base.data.sources..kafka.KafkaLoader" -> kafka,
-      "base.data.sources.kafka.DefaultLoader" -> hbase
+      "org.apache.hbase" -> hbase,
+      "base.data.loader.sources.hbase" -> hbase,
+      "org.apache.kafka" -> kafka,
+      "base.data.loader.sources.kafka" -> kafka
     )
   }
 
@@ -80,12 +82,8 @@ object DataLoader extends Logging {
               throw e
           }
         case head :: Nil =>
-          // there is exactly one registered alias
           head.getClass
         case sources =>
-          // There are multiple registered aliases for the input. If there is single datasource
-          // that has "org.apache.spark" package in the prefix, we use it considering it is an
-          // internal datasource within Spark.
           val sourceNames = sources.map(_.getClass.getName)
           val internalSources = sources.filter(_.getClass.getName.startsWith("org.apache.spark"))
           if (internalSources.size == 1) {

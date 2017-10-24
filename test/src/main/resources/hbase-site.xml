@@ -23,7 +23,7 @@
 <configuration>
     <property>
         <name>hbase.rootdir</name>
-        <value>file:///home/wpy/tmp/hbase</value>
+        <value>file:///home/wangpengyu6/tmp/hbase</value>
     </property>
     <property skipInDoc="true">
         <name>hbase.defaults.for.version</name>

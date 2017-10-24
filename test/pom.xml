@@ -11,12 +11,19 @@
     <properties>
         <spark.version>2.3.0-SNAPSHOT</spark.version>
         <hbase.version>3.0.0-SNAPSHOT</hbase.version>
+        <kafka.version>0.10.1.1</kafka.version>
         <scala.version>2.11</scala.version>
         <scala.binary.version>2.11.11</scala.binary.version>
         <java.version>1.8</java.version>
     </properties>
 
     <dependencies>
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+            <version>${kafka.version}</version>
+        </dependency>
+
         <dependency>
             <groupId>org.apache.hbase</groupId>
             <artifactId>hbase-backup</artifactId>

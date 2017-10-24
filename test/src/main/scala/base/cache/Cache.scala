@@ -1,12 +1,18 @@
 package base.cache
 
-trait Cache[K,V] {
+import org.apache.spark.sql.SparkSession
 
-  def appendData(key:K, value:V):Unit
+trait Cache {
+  type K
+  type V
 
-  def unCacheData(key:K)
+  def appendData(key: K, value: V): Unit
 
-  def getData(key:K):Option[V]
+  def unCacheData(key: K)
+
+  def getData(key: K): Option[V]
 }
 
-
+trait CacheCreator {
+  def createCache(ss: SparkSession, option: Map[String, String]): Cache
+}

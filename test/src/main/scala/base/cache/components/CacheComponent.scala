@@ -23,22 +23,23 @@ object CacheModes {
   def Ignore = base.cache.components.Ignore
 }
 
-trait CacheComponent[T,U] {
+trait CacheComponent[T, U] {
   self: Cache =>
 
   override type K = T
   override type V = U
+
   def cache(key: K, value: V, mode: CacheMode = ErrorIfExists) = mode match {
     case Append =>
-      appendData(key, value)
+      appendData(key, value :: Nil)
     case Overwrite =>
       unCacheData(key)
-      appendData(key, value)
+      appendData(key, value :: Nil)
     case ErrorIfExists =>
       getData(key) match {
         case Some(v) =>
           throw new AlreadyExistsException(s"key:[$key]->value:[$v] 已存在!")
-        case None => appendData(key, value)
+        case None => appendData(key, value :: Nil)
       }
     case Ignore =>
   }

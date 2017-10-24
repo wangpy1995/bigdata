@@ -19,13 +19,15 @@ class ParquetCache(
                     partitionKey: String
                   ) extends CacheComponent[String, DataFrame] with Cache {
 
+  import Table._
+
   /**
     *
     * @param key   partition Key
     * @param value table data
     */
-  override def appendData(key: K, value: V): Unit =
-    value.write.mode(SaveMode.Append).partitionBy(partitionKey).parquet(path)
+  override def appendData(key: K, value: List[V]): Unit =
+    value.foreach(_.write.mode(SaveMode.Append).partitionBy(partitionKey).parquet(path))
 
 
   override def unCacheData(key: K): Unit = {
@@ -33,9 +35,9 @@ class ParquetCache(
     FileSystem.get(Table.conf).delete(new Path(path), true)
   }
 
-  override def getData(key: K): Option[V] = Some(Table.df)
+  override def getData(key: K): Option[List[V]] = Some(df :: Nil)
 
-  object Table extends Logging {
+  private object Table extends Logging {
     val df = _ss.read.parquet(path)
     df.createOrReplaceGlobalTempView(name)
 
@@ -49,6 +51,7 @@ class ParquetCache(
 
     /**
       * not serialized shut cache with another map operation
+      *
       * @param partitionKey
       * @param start
       * @param end
@@ -82,53 +85,53 @@ class ParquetCache(
 
 object UserDefinedFileSourceStrategy extends Logging {
   def apply(plan: LogicalPlan, partitionKeyFilters: ExpressionSet, dataFilters: Seq[Expression]) = plan match {
-      case PhysicalOperation(projects, _,
-      l@LogicalRelation(fsRelation: HadoopFsRelation, _, table, _)) =>
-        val partitionColumns =
-          l.resolve(
-            fsRelation.partitionSchema, fsRelation.sparkSession.sessionState.analyzer.resolver)
+    case PhysicalOperation(projects, _,
+    l@LogicalRelation(fsRelation: HadoopFsRelation, _, table, _)) =>
+      val partitionColumns =
+        l.resolve(
+          fsRelation.partitionSchema, fsRelation.sparkSession.sessionState.analyzer.resolver)
 
-        val dataColumns =
-          l.resolve(fsRelation.dataSchema, fsRelation.sparkSession.sessionState.analyzer.resolver)
+      val dataColumns =
+        l.resolve(fsRelation.dataSchema, fsRelation.sparkSession.sessionState.analyzer.resolver)
 
-        // Predicates with both partition keys and attributes need to be evaluated after the scan.
-        val afterScanFilters = dataFilters
+      // Predicates with both partition keys and attributes need to be evaluated after the scan.
+      val afterScanFilters = dataFilters
 
-        logInfo(s"Post-Scan Filters: ${afterScanFilters.mkString(",")}")
+      logInfo(s"Post-Scan Filters: ${afterScanFilters.mkString(",")}")
 
-        val filterAttributes = AttributeSet(afterScanFilters)
-        val requiredExpressions: Seq[NamedExpression] = filterAttributes.toSeq ++ projects
-        val requiredAttributes = AttributeSet(requiredExpressions.diff(partitionKeyFilters.toSeq))
+      val filterAttributes = AttributeSet(afterScanFilters)
+      val requiredExpressions: Seq[NamedExpression] = filterAttributes.toSeq ++ projects
+      val requiredAttributes = AttributeSet(requiredExpressions.diff(partitionKeyFilters.toSeq))
 
-        val readDataColumns =
-          dataColumns
-            .filter(requiredAttributes.contains)
-            .filterNot(partitionColumns.contains)
-        val outputSchema = readDataColumns.toStructType
-        logInfo(s"Output Data Schema: ${outputSchema.simpleString(5)}")
+      val readDataColumns =
+        dataColumns
+          .filter(requiredAttributes.contains)
+          .filterNot(partitionColumns.contains)
+      val outputSchema = readDataColumns.toStructType
+      logInfo(s"Output Data Schema: ${outputSchema.simpleString(5)}")
 
-        val outputAttributes = readDataColumns/* ++ partitionColumns*/
+      val outputAttributes = readDataColumns /* ++ partitionColumns*/
 
-        val scan =
-          FileSourceScanExec(
-            fsRelation,
-            outputAttributes,
-            outputSchema,
-            partitionKeyFilters.toSeq,
-            dataFilters,
-            table.map(_.identifier))
+      val scan =
+        FileSourceScanExec(
+          fsRelation,
+          outputAttributes,
+          outputSchema,
+          partitionKeyFilters.toSeq,
+          dataFilters,
+          table.map(_.identifier))
 
-        val afterScanFilter = afterScanFilters.reduceOption(expressions.And)
-        val withFilter = afterScanFilter.map(execution.FilterExec(_, scan)).getOrElse(scan)
-        val withProjections = if (projects == withFilter.output) {
-          withFilter
-        } else {
-          execution.ProjectExec(projects, withFilter)
-        }
+      val afterScanFilter = afterScanFilters.reduceOption(expressions.And)
+      val withFilter = afterScanFilter.map(execution.FilterExec(_, scan)).getOrElse(scan)
+      val withProjections = if (projects == withFilter.output) {
+        withFilter
+      } else {
+        execution.ProjectExec(projects, withFilter)
+      }
 
-        withProjections :: Nil
+      withProjections :: Nil
 
-      case _ => Nil
-    }
+    case _ => Nil
+  }
 
 }

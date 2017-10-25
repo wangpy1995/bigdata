@@ -1,16 +1,16 @@
 package base.cache.sources.parquet
 
+import base.cache.Cache
 import base.cache.components.CacheComponent
-import base.cache.{Cache, CacheCreator}
 import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.spark.internal.Logging
+import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.expressions
 import org.apache.spark.sql.catalyst.expressions.{AttributeSet, Expression, ExpressionSet, GreaterThanOrEqual, InSet, IsNotNull, LessThanOrEqual, Literal, NamedExpression}
 import org.apache.spark.sql.catalyst.planning.PhysicalOperation
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.FileSourceScanExec
 import org.apache.spark.sql.execution.datasources.{HadoopFsRelation, LogicalRelation}
-import org.apache.spark.sql.{DataFrame, SaveMode, SparkSession, execution}
 
 class ParquetCache(
                     _ss: SparkSession,
@@ -24,25 +24,31 @@ class ParquetCache(
     * @param key   partition Key
     * @param value table data
     */
-  override def appendData(key: K, value: List[V]): Unit =
-    value.foreach(_.coalesce(1).write.mode(SaveMode.Append) /*.partitionBy(partitionKey)*/ .parquet(path))
+  override def appendData(key: K, value: List[V]): Unit = {
+    val dfWriter = PlanToDF.unionDF(_ss, value).coalesce(1).write.mode(SaveMode.Append)
+    (if (partitionKey.nonEmpty) dfWriter.partitionBy(partitionKey)
+    else dfWriter).parquet(path)
+    Table.df = _ss.read.parquet(path)
+  }
 
 
   override def unCacheData(key: K): Unit = {
     FileSystem.get(Table.conf).delete(new Path(path), true)
+    Table.df = _ss.emptyDataFrame
   }
 
-  override def overwriteData(key: String, value: V): Unit =
-    value.write.mode(SaveMode.Overwrite).parquet(path)
+  override def overwriteData(key: String, value: V): Unit = {
+    val dfWriter = value.coalesce(1).write.mode(SaveMode.Overwrite)
+    (if (partitionKey.nonEmpty) dfWriter.partitionBy(partitionKey)
+    else dfWriter).parquet(path)
+    Table.df = _ss.read.parquet(path)
+  }
 
   override def getData(key: K) = Some(Table.df :: Nil)
 
   private object Table extends Logging {
-    val df = _ss.read.parquet(path)
-    lazy val conf = df.sparkSession.sparkContext.hadoopConfiguration
-
-    val plan = df.queryExecution.optimizedPlan
-    val output = plan.output
+    var df: DataFrame = null
+    lazy val conf = _ss.sparkContext.hadoopConfiguration
 
 
     /**
@@ -61,6 +67,11 @@ class ParquetCache(
               dataKey: String = "classifier",
               values: Array[Int] = Array.empty[Int]
             ) = {
+      if (df == null || df.schema.isEmpty)
+        df = _ss.read.parquet(path)
+
+      val plan = df.queryExecution.optimizedPlan
+      val output = plan.output
       val partitionAttr = output.filter(_.name == partitionKey).head
       val dataAttr = output.filter(_.name == dataKey).head
 
@@ -76,6 +87,7 @@ class ParquetCache(
       UserDefinedFileSourceStrategy(plan, partitionKeyFilters, dataFilters).head.execute()
     }
   }
+
 }
 
 object UserDefinedFileSourceStrategy extends Logging {
@@ -105,7 +117,7 @@ object UserDefinedFileSourceStrategy extends Logging {
       val outputSchema = readDataColumns.toStructType
       logInfo(s"Output Data Schema: ${outputSchema.simpleString(5)}")
 
-      val outputAttributes = readDataColumns /* ++ partitionColumns*/
+      val outputAttributes = readDataColumns ++ partitionColumns
 
       val scan =
         FileSourceScanExec(

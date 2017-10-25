@@ -27,12 +27,14 @@ class RDDCache extends CacheComponent[String, RDD[_]]
       (oldRDDs: List[V]) => {
         val newRDDs = values.map(_.cache())
         persistentValues.update(key, oldRDDs ::: newRDDs)
-        newRDDs.foreach(_.count())
+        newRDDs.foreach(_.checkpoint())
+        newRDDs.foreach(c=>println(c.count()))
       }
     } {
       val newRDDs = values.map(_.cache())
       persistentValues.put(key, newRDDs)
-      newRDDs.foreach(_.count())
+      newRDDs.foreach(_.checkpoint())
+      newRDDs.foreach(c=>println(c.count()))
     }
   }
 
@@ -55,6 +57,6 @@ class RDDCache extends CacheComponent[String, RDD[_]]
 
   override def overwriteData(key: String, value: V): Unit = {
     unCacheData(key)
-    appendData(key,value::Nil)
+    appendData(key, value :: Nil)
   }
 }

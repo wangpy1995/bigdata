@@ -13,6 +13,6 @@ package object data {
 
   type KafkaRDD = RDD[ConsumerRecord[Any,Any]]
 
-  type CacheRDD = RDD[mutable.Map[String,Any]]
+  type CacheRDD = RDD[mutable.Map[String,Array[Byte]]]
 
 }

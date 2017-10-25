@@ -33,8 +33,7 @@ trait CacheComponent[T, U] {
     case Append =>
       appendData(key, value :: Nil)
     case Overwrite =>
-      unCacheData(key)
-      appendData(key, value :: Nil)
+      overwriteData(key,value)
     case ErrorIfExists =>
       getData(key) match {
         case Some(v) =>

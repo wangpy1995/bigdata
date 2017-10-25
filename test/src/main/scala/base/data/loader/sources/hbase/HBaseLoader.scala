@@ -22,7 +22,7 @@ case class HBaseLoader(
                         conf: Configuration) extends LoadWithConverterComponent[HBaseRDD, CacheRDD]
   with Loader with Converter with KryoSerializable with Serializable {
 
-  @transient var map = new mutable.HashMap[String, Any]()
+  @transient var map = new mutable.HashMap[String, Array[Byte]]()
 
   override def doLoad(): HBaseRDD = {
     _sc.newAPIHadoopRDD(conf,
@@ -45,15 +45,15 @@ case class HBaseLoader(
   }
 
   override def read(kryo: Kryo, input: Input) = {
-    map = kryo.readObject(input, classOf[mutable.HashMap[String, Any]])
+    map = kryo.readObject(input, classOf[mutable.HashMap[String, Array[Byte]]])
   }
 
   override def write(kryo: Kryo, output: Output) = {
-    kryo.writeClass(output, classOf[mutable.HashMap[String, Any]])
+    kryo.writeClass(output, classOf[mutable.HashMap[String, Array[Byte]]])
   }
 
   private def readObject(in: ObjectInputStream): Unit = {
-    map = in.readObject().asInstanceOf[mutable.HashMap[String, Any]]
+    map = in.readObject().asInstanceOf[mutable.HashMap[String, Array[Byte]]]
   }
 
   private def writeObject(out: ObjectOutputStream): Unit = {

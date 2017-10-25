@@ -6,6 +6,8 @@ trait Cache {
   type K
   type V
 
+  def overwriteData(key:K,value:V)
+
   def appendData(key: K, value: List[V]): Unit
 
   def unCacheData(key: K)
@@ -14,5 +16,7 @@ trait Cache {
 }
 
 trait CacheCreator {
+  def shortName():String
+
   def createCache(ss: SparkSession, option: Map[String, String]): Cache
 }

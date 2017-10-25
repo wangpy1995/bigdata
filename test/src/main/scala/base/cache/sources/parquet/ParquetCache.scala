@@ -1,10 +1,10 @@
 package base.cache.sources.parquet
 
-import base.cache.Cache
 import base.cache.components.CacheComponent
+import base.cache.{Cache, CacheCreator}
 import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.spark.internal.Logging
-import org.apache.spark.sql.catalyst.{TableIdentifier, expressions}
+import org.apache.spark.sql.catalyst.expressions
 import org.apache.spark.sql.catalyst.expressions.{AttributeSet, Expression, ExpressionSet, GreaterThanOrEqual, InSet, IsNotNull, LessThanOrEqual, Literal, NamedExpression}
 import org.apache.spark.sql.catalyst.planning.PhysicalOperation
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
@@ -19,31 +19,27 @@ class ParquetCache(
                     partitionKey: String
                   ) extends CacheComponent[String, DataFrame] with Cache {
 
-  import Table._
-
   /**
     *
     * @param key   partition Key
     * @param value table data
     */
   override def appendData(key: K, value: List[V]): Unit =
-    value.foreach(_.write.mode(SaveMode.Append).partitionBy(partitionKey).parquet(path))
+    value.foreach(_.coalesce(1).write.mode(SaveMode.Append) /*.partitionBy(partitionKey)*/ .parquet(path))
 
 
   override def unCacheData(key: K): Unit = {
-    _ss.sessionState.catalog.dropGlobalTempView(name)
     FileSystem.get(Table.conf).delete(new Path(path), true)
   }
 
-  override def getData(key: K): Option[List[V]] = Some(df :: Nil)
+  override def overwriteData(key: String, value: V): Unit =
+    value.write.mode(SaveMode.Overwrite).parquet(path)
+
+  override def getData(key: K) = Some(Table.df :: Nil)
 
   private object Table extends Logging {
     val df = _ss.read.parquet(path)
-    df.createOrReplaceGlobalTempView(name)
-
     lazy val conf = df.sparkSession.sparkContext.hadoopConfiguration
-
-    val table = _ss.sessionState.catalog.getTempViewOrPermanentTableMetadata(TableIdentifier(name))
 
     val plan = df.queryExecution.optimizedPlan
     val output = plan.output
@@ -80,7 +76,6 @@ class ParquetCache(
       UserDefinedFileSourceStrategy(plan, partitionKeyFilters, dataFilters).head.execute()
     }
   }
-
 }
 
 object UserDefinedFileSourceStrategy extends Logging {

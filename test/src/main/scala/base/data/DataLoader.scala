@@ -14,10 +14,9 @@ import scala.util.{Failure, Success, Try}
 case class DataLoader(
                        sparkSession: SparkSession,
                        className: String,
-                       paths: Seq[String] = Nil,
                        options: Map[String, String] = Map.empty
                      ) extends Logging {
-  lazy val providingClass: Class[_] = DataLoader.lookupDataLoader(className)
+  private lazy val providingClass: Class[_] = DataLoader.lookupDataLoader(className)
 
   def resolveLoader: Loader = {
     providingClass.newInstance() match {
@@ -64,17 +63,14 @@ object DataLoader extends Logging {
 
     try {
       serviceLoader.asScala.filter(_.shortName().equalsIgnoreCase(provider1)).toList match {
-        // the provider format did not match any given registered aliases
         case Nil =>
           try {
             Try(loader.loadClass(provider1)).orElse(Try(loader.loadClass(provider2))) match {
               case Success(dataSource) =>
-                // Found the data source using fully qualified path
                 dataSource
               case Failure(error) =>
                 throw new ClassNotFoundException(
-                  s"Failed to find data source: $provider1. Please find packages at " +
-                    "http://spark.apache.org/third-party-projects.html",
+                  s"Failed to find data loader: $provider1.",
                   error)
             }
           } catch {
@@ -85,13 +81,13 @@ object DataLoader extends Logging {
           head.getClass
         case sources =>
           val sourceNames = sources.map(_.getClass.getName)
-          val internalSources = sources.filter(_.getClass.getName.startsWith("org.apache.spark"))
+          val internalSources = sources.filter(_.getClass.getName.startsWith("base.data.loader"))
           if (internalSources.size == 1) {
-            logWarning(s"Multiple sources found for $provider1 (${sourceNames.mkString(", ")}), " +
-              s"defaulting to the internal datasource (${internalSources.head.getClass.getName}).")
+            logWarning(s"Multiple loaders found for $provider1 (${sourceNames.mkString(", ")}), " +
+              s"defaulting to the internal dataLoader (${internalSources.head.getClass.getName}).")
             internalSources.head.getClass
           } else {
-            throw new UnsupportedOperationException(s"Multiple sources found for $provider1 " +
+            throw new UnsupportedOperationException(s"Multiple loaders found for $provider1 " +
               s"(${sourceNames.mkString(", ")}), please specify the fully qualified class name.")
           }
       }

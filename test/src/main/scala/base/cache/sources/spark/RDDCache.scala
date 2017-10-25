@@ -12,27 +12,27 @@ import scala.collection.JavaConverters._
 class RDDCache extends CacheComponent[String, RDD[_]]
   with Cache {
 
-  private[cache] val persistentValues = {
-    val map: ConcurrentMap[K, List[V]] = new MapMaker().weakValues().makeMap[K, List[V]]()
+  private[cache] lazy val persistentValues = {
+    val map: ConcurrentMap[K, List[V]] = new MapMaker().makeMap[K, List[V]]()
     map.asScala
   }
 
   private def getOrElseNone[T, U](key: K)(f1: T => U)(f2: => U) = persistentValues.get(key) match {
-    case Some(rdd) => f1(rdd)
-    case None => f2
+    case Some(rdd: T) => f1(rdd)
+    case _ => f2
   }
 
   override def appendData(key: K, values: List[V]): Unit = {
     getOrElseNone(key) {
       (oldRDDs: List[V]) => {
         val newRDDs = values.map(_.cache())
-        newRDDs.foreach(_.count())
         persistentValues.update(key, oldRDDs ::: newRDDs)
+        newRDDs.foreach(_.count())
       }
     } {
       val newRDDs = values.map(_.cache())
-      newRDDs.foreach(_.count())
       persistentValues.put(key, newRDDs)
+      newRDDs.foreach(_.count())
     }
   }
 
@@ -52,4 +52,9 @@ class RDDCache extends CacheComponent[String, RDD[_]]
   }
 
   def getAll = persistentValues.values
+
+  override def overwriteData(key: String, value: V): Unit = {
+    unCacheData(key)
+    appendData(key,value::Nil)
+  }
 }

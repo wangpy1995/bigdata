@@ -44,7 +44,7 @@ object CacheBuilder extends Logging {
     val provider1 = backwardCompatibilityMap.getOrElse(provider, provider)
     val provider2 = s"$provider1.DefaultSource"
     val loader = Option(Thread.currentThread().getContextClassLoader).getOrElse(CacheBuilder.getClass.getClassLoader)
-    val serviceLoader = ServiceLoader.load(classOf[CacheCreator], loader)
+    val serviceLoader = ServiceLoader.load(classOf[CacheCreator[_,_]], loader)
     try {
       serviceLoader.asScala.filter(_.shortName().equalsIgnoreCase(provider1)).toList match {
         // the provider format did not match any given registered aliases

@@ -66,14 +66,14 @@ class LoaderTestSuite extends FunSuite {
     val l1Cache = CacheBuilder.buildCacheComponent(
       ss,
       "base.cache.sources.spark.RDDCacheCreator",
-      implicitly[ClassTag[String]],
-      implicitly[ClassTag[RDD[(Int, Int)]]])
+      classOf[String],
+      classOf[RDD[(Int, Int)]])
 
     val l2Cache = CacheBuilder.buildCacheComponent(
       ss,
       "base.cache.sources.parquet.ParquetCacheCreator",
-      implicitly[ClassTag[String]],
-      implicitly[ClassTag[DataFrame]],
+      classOf[String],
+      classOf[DataFrame],
       Map("name" -> "data", "path" -> "/home/wangpengyu6/tmp/test_parquet", "partitionKey" -> "")
     )
 

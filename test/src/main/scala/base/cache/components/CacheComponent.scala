@@ -23,9 +23,8 @@ object CacheModes {
   def Ignore = base.cache.components.Ignore
 }
 
-trait CacheComponent[T, U] {
+trait CacheComponent[T,U]{
   self: Cache =>
-
   override type K = T
   override type V = U
 

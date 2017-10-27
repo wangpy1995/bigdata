@@ -1,6 +1,7 @@
 package base.data.test
 
 import base.cache.CacheBuilder
+import base.cache.sources.parquet.ParquetCache
 import base.data.loader.sources.hbase.HBaseLoader
 import base.data.test.utils.HBaseTestUtil
 import base.data.{CacheRDD, DataLoader}
@@ -9,11 +10,13 @@ import org.apache.hadoop.hbase.io.ImmutableBytesWritable
 import org.apache.hadoop.hbase.mapreduce.{IdentityTableMapper, TableMapReduceUtil}
 import org.apache.hadoop.mapreduce.Job
 import org.apache.spark.rdd.{RDD, UnionRDD}
+import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.apache.spark.{SparkConf, SparkContext}
 import org.scalatest.FunSuite
 
 import scala.io.StdIn
+import scala.reflect.ClassTag
 
 class LoaderTestSuite extends FunSuite {
 
@@ -29,7 +32,7 @@ class LoaderTestSuite extends FunSuite {
     val j = Job.getInstance()
     val scan = new Scan()
     TableMapReduceUtil.initTableMapperJob(
-      "wpy1:test",
+      "test",
       scan,
       classOf[IdentityTableMapper],
       classOf[ImmutableBytesWritable],
@@ -42,24 +45,40 @@ class LoaderTestSuite extends FunSuite {
     val ss = SparkSession.builder().config(sparkConf).getOrCreate()
     val opts = job.getConfiguration.iterator().asScala.map(kv => kv.getKey -> kv.getValue).toMap
     val data: CacheRDD = DataLoader(ss, "base.data.loader.sources.hbase", opts).load()
+    data foreach println
     StdIn.readLine()
   }
 
   test("cache") {
+    import collection.JavaConverters._
     val ss = SparkSession.builder().config(sparkConf).getOrCreate()
-    ss.sparkContext.setCheckpointDir("/home/wpy/tmp/checkpoint")
+    ss.sparkContext.setCheckpointDir("/home/wangpengyu6/tmp/checkpoint")
     import ss.implicits._
-    val testData1 = ss.sparkContext.parallelize(Array((1, 2), (3, 4), (5, 6), (7, 8), (9, 0), (1, 2), (3, 4), (5, 6), (7, 8), (9, 0), (1, 2), (3, 4), (5, 6), (7, 8), (9, 0), (1, 2), (3, 4), (5, 6), (7, 8), (9, 0)))
-    val testData2 = ss.sparkContext.parallelize(Array((11, 12), (13, 14), (15, 16), (17, 18), (19, 10), (11, 12), (13, 14), (15, 16), (17, 18), (19, 10), (11, 12), (13, 14), (15, 16), (17, 18), (19, 10)))
-    val testData3 = ss.sparkContext.parallelize(Array((21, 22), (23, 24), (25, 26), (27, 28), (29, 20), (21, 22), (23, 24), (25, 26), (27, 28), (29, 20), (21, 22), (23, 24), (25, 26), (27, 28), (29, 20)))
-    val l1Cache = CacheBuilder(ss, "base.cache.sources.spark.RDDCacheCreator").buildCacheComponent[String, RDD[(Int, Int)]]
-    val l2Cache = CacheBuilder(
+    /* val opts = job.getConfiguration.iterator().asScala.map(kv => kv.getKey -> kv.getValue).toMap
+     val testData1: CacheRDD = DataLoader(ss, "base.data.loader.sources.hbase", opts).load()
+     val testData2: CacheRDD = DataLoader(ss, "base.data.loader.sources.hbase", opts).load()
+     val testData3: CacheRDD = DataLoader(ss, "base.data.loader.sources.hbase", opts).load()*/
+
+    val testData1 = Array((1, 2), (3, 4), (5, 6), (7, 8), (9, 0), (1, 2), (3, 4), (5, 6), (7, 8), (9, 0), (1, 2), (3, 4), (5, 6), (7, 8), (9, 0), (1, 2), (3, 4), (5, 6), (7, 8), (9, 0))
+    val testData2 = Array((11, 12), (13, 14), (15, 16), (17, 18), (19, 10), (11, 12), (13, 14), (15, 16), (17, 18), (19, 10), (11, 12), (13, 14), (15, 16), (17, 18), (19, 10))
+    val testData3 = Array((21, 22), (23, 24), (25, 26), (27, 28), (29, 20), (21, 22), (23, 24), (25, 26), (27, 28), (29, 20), (21, 22), (23, 24), (25, 26), (27, 28), (29, 20))
+
+    val l1Cache = CacheBuilder.buildCacheComponent(
+      ss,
+      "base.cache.sources.spark.RDDCacheCreator",
+      implicitly[ClassTag[String]],
+      implicitly[ClassTag[RDD[(Int, Int)]]])
+
+    val l2Cache = CacheBuilder.buildCacheComponent(
       ss,
       "base.cache.sources.parquet.ParquetCacheCreator",
-      Map("name" -> "data", "path" -> "/home/wpy/tmp/test_parquet", "partitionKey" -> "")
-    ).buildCacheComponent[String, DataFrame]
+      implicitly[ClassTag[String]],
+      implicitly[ClassTag[DataFrame]],
+      Map("name" -> "data", "path" -> "/home/wangpengyu6/tmp/test_parquet", "partitionKey" -> "")
+    )
 
-    l1Cache.appendData("data", testData1 :: testData2 :: testData3 :: Nil)
+    val testData = List(testData1, testData2, testData3).map(ss.sparkContext.parallelize(_))
+    l1Cache.appendData("data", testData)
     l1Cache.getData("data") match {
       case Some(rdds) =>
         new UnionRDD(ss.sparkContext, rdds).coalesce(1).mapPartitions(iter => iter).distinct().foreach(println)
@@ -67,12 +86,16 @@ class LoaderTestSuite extends FunSuite {
         println("none L1 cache")
     }
     l1Cache.unCache("data")
-    l2Cache.appendData("data", (testData1 :: testData2 :: testData3 :: Nil).map(_.toDF("key", "value")))
-    l2Cache.getData("data") match {
-      case Some(dfs) => dfs.foreach(_.coalesce(1).distinct().map(_.toString).foreach(println(_)))
-      case _ => throw new Exception("unknown error")
+
+    l2Cache.appendData("data", testData.map(_.toDF("key", "value")))
+    l2Cache.getData("data") /*Table.load("dt", 20170701, 20171030)*/ match {
+      case Some(dfs) =>
+        dfs.foreach(df => println(df.count()))
+      case _ =>
+        throw new Exception("unknown error")
     }
-    l2Cache.unCache("data")
+    //    l2Cache.unCache("data")
+
     StdIn.readLine()
   }
 

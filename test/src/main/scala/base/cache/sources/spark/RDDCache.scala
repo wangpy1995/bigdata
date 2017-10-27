@@ -8,6 +8,7 @@ import org.apache.curator.shaded.com.google.common.collect.MapMaker
 import org.apache.spark.rdd.RDD
 
 import scala.collection.JavaConverters._
+import scala.reflect.ClassTag
 
 class RDDCache extends CacheComponent[String, RDD[_]]
   with Cache {
@@ -17,8 +18,8 @@ class RDDCache extends CacheComponent[String, RDD[_]]
     map.asScala
   }
 
-  private def getOrElseNone[T, U](key: K)(f1: T => U)(f2: => U) = persistentValues.get(key) match {
-    case Some(rdd: T) => f1(rdd)
+  private def getOrElseNone[X, Y](key: K)(f1: X => Y)(f2: => Y) = persistentValues.get(key) match {
+    case Some(rdd: X) => f1(rdd)
     case _ => f2
   }
 
@@ -28,13 +29,13 @@ class RDDCache extends CacheComponent[String, RDD[_]]
         val newRDDs = values.map(_.cache())
         persistentValues.update(key, oldRDDs ::: newRDDs)
         newRDDs.foreach(_.checkpoint())
-        newRDDs.foreach(c=>println(c.count()))
+        newRDDs.foreach(c => println(c.count()))
       }
     } {
       val newRDDs = values.map(_.cache())
       persistentValues.put(key, newRDDs)
       newRDDs.foreach(_.checkpoint())
-      newRDDs.foreach(c=>println(c.count()))
+      newRDDs.foreach(c => println(c.count()))
     }
   }
 
@@ -55,7 +56,7 @@ class RDDCache extends CacheComponent[String, RDD[_]]
 
   def getAll = persistentValues.values
 
-  override def overwriteData(key: String, value: V): Unit = {
+  override def overwriteData(key: K, value: V): Unit = {
     unCacheData(key)
     appendData(key, value :: Nil)
   }

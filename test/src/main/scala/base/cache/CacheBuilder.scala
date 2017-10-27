@@ -9,23 +9,24 @@ import org.apache.spark.internal.Logging
 import org.apache.spark.sql.SparkSession
 
 import scala.collection.JavaConverters._
+import scala.reflect.ClassTag
 import scala.util.{Failure, Success, Try}
 
-case class CacheBuilder(ss: SparkSession,
-                        className: String,
-                        options: Map[String, String] = Map.empty
-                       ) {
-  lazy val cacheClass: Class[_] = CacheBuilder.lookupCreator(className)
+object CacheBuilder extends Logging {
 
-  def buildCacheComponent[K, V]: Cache with CacheComponent[K, V] = cacheClass.newInstance() match {
-    case cc: CacheCreator =>
-      cc.createCache(ss, options).asInstanceOf[Cache with CacheComponent[K, V]]
-    case cache =>
+  def buildCacheComponent[K, V](
+                                 ss: SparkSession,
+                                 className: String,
+                                 keyTag: ClassTag[K],
+                                 valueTag: ClassTag[V],
+                                 options: Map[String, String] = Map.empty
+                               ): Cache with CacheComponent[K, V] = lookupCreator(className).newInstance() match {
+    case cc: CacheCreator[K,V] =>
+      cc.createCache(ss, options)
+    case _ =>
       throw new UnsupportedOperationException(s"unsupported")
   }
-}
 
-object CacheBuilder extends Logging {
   /** A map to maintain backward compatibility in case we move data sources around. */
   private val backwardCompatibilityMap: Map[String, String] = {
     val rdd = classOf[RDDCacheCreator].getCanonicalName

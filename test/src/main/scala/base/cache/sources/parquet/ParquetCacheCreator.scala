@@ -1,12 +1,12 @@
 package base.cache.sources.parquet
 
-import base.cache.{Cache, CacheCreator}
-import org.apache.spark.sql.SparkSession
+import base.cache.CacheCreator
+import org.apache.spark.sql.{DataFrame, SparkSession}
 
-class ParquetCacheCreator extends CacheCreator {
-  override def createCache(ss: SparkSession, option: Map[String, String]): Cache = {
+class ParquetCacheCreator extends CacheCreator[String,DataFrame] {
+  override def shortName() = "parquet"
+
+  override def createCache(ss: SparkSession, option: Map[String, String]) = {
     new ParquetCache(ss, option("name"), option("path"), option("partitionKey"))
   }
-
-  override def shortName() = "parquet"
 }

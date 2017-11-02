@@ -1,4 +1,4 @@
-package org.apache.spark.sql.arrow
+package org.apache.spark.rdd.arrow
 
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
@@ -13,7 +13,7 @@ class ArrowWriterTestSuite extends FunSuite{
 
   test("arrow_writer"){
     import ss.implicits._
-    (1 to 1600).toDF.collectAsArrowToPython()
+    (1 to 1600).toDF/*.collectAsArrowToPython()*/
     StdIn.readLine()
   }
 }

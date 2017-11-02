@@ -24,7 +24,7 @@ class ParquetCache(
     * @param value table data
     */
   override def appendData(key: K, value: List[V]): Unit = {
-    val dfWriter = PlanToDF.unionDF(_ss, value).coalesce(1).write.mode(SaveMode.Append)
+    val dfWriter = RDDUtils.unionDF(_ss, value).coalesce(1).write.mode(SaveMode.Append)
     (if (partitionKey.nonEmpty) dfWriter.partitionBy(partitionKey)
     else dfWriter).parquet(path)
     Table.refresh()

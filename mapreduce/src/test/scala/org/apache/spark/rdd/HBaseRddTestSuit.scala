@@ -1,8 +1,11 @@
-package org.apache.spark.sql
+package org.apache.spark.rdd
+
+import java.nio.ByteBuffer
 
 import org.apache.arrow.memory.RootAllocator
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.hbase.client.{ConnectionFactory, Put, Scan}
+import org.apache.hadoop.hbase.filter.FirstKeyOnlyFilter
 import org.apache.hadoop.hbase.mapreduce.{RowCounter, TableRecordReader}
 import org.apache.hadoop.hbase.util.Bytes
 import org.apache.hadoop.hbase.{CellUtil, HBaseConfiguration, TableName}
@@ -23,17 +26,23 @@ class HBaseRddTestSuit extends FunSuite with BeforeAndAfter {
   val configuration = new SerializableConfiguration(conf)
   val conn = ConnectionFactory.createConnection(conf)
   val admin = conn.getAdmin
-  val tableName = TableName.valueOf("wpy1:test")
+  val tableName = TableName.valueOf("HIK_SMART_METADATA")
+
   test("hbase rdd") {
     //    val scan = TableMapReduceUtil.convertScanToString(new Scan())
     val job =
-      RowCounter.createSubmittableJob(new Configuration(), Array("wpy1:test"))
+      RowCounter.createSubmittableJob(new Configuration(), Array("HIK_SMART_METADATA"))
     //    val c = sc.broadcast(conf)
-    val rdd = new HBaseRDD(sc, "wpy1:test", new SerializableConfiguration(job.getConfiguration), 100 * 1000 * 1000)
-    val buf = new RootAllocator(Int.MaxValue).buffer(2048)
-    val pars = rdd.zipWithIndex().map(cell => cell._1._2.rawCells().map(c => buf.readBytes(CellUtil.cloneValue(c))))
-
-    rdd.foreach(_ => {})
+    val rdd = new HBaseRDD(sc, "HIK_SMART_METADATA", new SerializableConfiguration(job.getConfiguration), 1800 * 1000 * 1000)
+    //    val buf = new RootAllocator(Int.MaxValue).buffer(2048)
+    //    val pars = rdd.zipWithIndex().map(cell => cell._1._2.rawCells().map(c => buf.readBytes(CellUtil.cloneValue(c))))
+//    println(rdd.partitions.map(_.asInstanceOf[AverageHBasePartition].partition.map(_.split.getLength).sum).mkString("\n"))
+//    System.exit(0)
+    println(rdd.mapPartitions { iter =>
+      val l = iter.length
+      println(l)
+      Iterator(l)
+    }.reduce(_ + _))
     Console.in.read()
     //    while (true) Thread.sleep(10000)
   }
@@ -71,4 +80,11 @@ class HBaseRddTestSuit extends FunSuite with BeforeAndAfter {
     admin.close()
     conn.close()
   }
+
+  def getAs[T, U](x: U): T = x.asInstanceOf[T]
+
+  def testImplicit[T](x: T)(implicit bytes: T => Array[Byte]) = {
+
+  }
+
 }

@@ -1,7 +1,6 @@
 package base.data.test
 
 import base.cache.CacheBuilder
-import base.cache.sources.parquet.ParquetCache
 import base.data.loader.sources.hbase.HBaseLoader
 import base.data.test.utils.HBaseTestUtil
 import base.data.{CacheRDD, DataLoader}
@@ -10,13 +9,11 @@ import org.apache.hadoop.hbase.io.ImmutableBytesWritable
 import org.apache.hadoop.hbase.mapreduce.{IdentityTableMapper, TableMapReduceUtil}
 import org.apache.hadoop.mapreduce.Job
 import org.apache.spark.rdd.{RDD, UnionRDD}
-import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.apache.spark.{SparkConf, SparkContext}
 import org.scalatest.FunSuite
 
 import scala.io.StdIn
-import scala.reflect.ClassTag
 
 class LoaderTestSuite extends FunSuite {
 
@@ -50,7 +47,6 @@ class LoaderTestSuite extends FunSuite {
   }
 
   test("cache") {
-    import collection.JavaConverters._
     val ss = SparkSession.builder().config(sparkConf).getOrCreate()
     ss.sparkContext.setCheckpointDir("/home/wangpengyu6/tmp/checkpoint")
     import ss.implicits._
@@ -62,12 +58,16 @@ class LoaderTestSuite extends FunSuite {
     val testData1 = Array((1, 2), (3, 4), (5, 6), (7, 8), (9, 0), (1, 2), (3, 4), (5, 6), (7, 8), (9, 0), (1, 2), (3, 4), (5, 6), (7, 8), (9, 0), (1, 2), (3, 4), (5, 6), (7, 8), (9, 0))
     val testData2 = Array((11, 12), (13, 14), (15, 16), (17, 18), (19, 10), (11, 12), (13, 14), (15, 16), (17, 18), (19, 10), (11, 12), (13, 14), (15, 16), (17, 18), (19, 10))
     val testData3 = Array((21, 22), (23, 24), (25, 26), (27, 28), (29, 20), (21, 22), (23, 24), (25, 26), (27, 28), (29, 20), (21, 22), (23, 24), (25, 26), (27, 28), (29, 20))
+    val loader = Thread.currentThread().getContextClassLoader
+    val k = loader.loadClass("java.lang.String")
+    val v1 = loader.loadClass("org.apache.spark.rdd.RDD")
+    val v2 = loader.loadClass("org.apache.spark.sql.Dataset")
 
     val l1Cache = CacheBuilder.buildCacheComponent(
       ss,
       "base.cache.sources.spark.RDDCacheCreator",
       classOf[String],
-      classOf[RDD[(Int, Int)]])
+      classOf[RDD[(Int,Int)]])
 
     val l2Cache = CacheBuilder.buildCacheComponent(
       ss,

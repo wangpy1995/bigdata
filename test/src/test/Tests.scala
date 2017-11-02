@@ -17,6 +17,6 @@ class Test3 {
 
 object Test {
   def main(args: Array[String]): Unit = {
-
+    val str1 = Random
   }
 }

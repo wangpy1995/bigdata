@@ -3,12 +3,11 @@ package mapreduce.hbase.test
 import org.apache.hadoop.hbase.client.{Result, Scan}
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable
 import org.apache.hadoop.hbase.mapreduce.TableInputFormat
-import org.apache.hadoop.hbase.shaded.protobuf.ProtobufUtil
 import org.apache.hadoop.hbase.util.{Base64, Bytes}
 import org.apache.hadoop.hbase.{CellUtil, HBaseConfiguration}
 import org.apache.spark.internal.Logging
-import org.apache.spark.{Partition, SparkConf, SparkContext, TaskContext}
 import org.apache.spark.rdd.{NewHadoopRDD, RDD}
+import org.apache.spark.{Partition, SparkConf, SparkContext, TaskContext}
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -33,6 +32,7 @@ class MyRDD[K, V](sc: SparkContext, rdd: NewHadoopRDD[K, V], numParts: Int) exte
 
 case class MyPartition(array: ArrayBuffer[Partition], var index: Int) extends Partition
 
+/*
 
 object TestMyRDD extends Logging {
   def main(args: Array[String]): Unit = {
@@ -72,4 +72,4 @@ object TestMyRDD extends Logging {
       Thread.sleep(10000)
     }
   }
-}
+}*/

@@ -13,31 +13,34 @@ import org.apache.hadoop.hbase.util.{Bytes, RegionSizeCalculator}
 import org.apache.hadoop.hbase.{HConstants, TableName}
 import org.apache.hadoop.mapred.JobConf
 import org.apache.hadoop.mapreduce._
+import org.apache.hadoop.mapreduce.lib.input.{CombineFileSplit, FileSplit}
 import org.apache.hadoop.mapreduce.task.TaskAttemptContextImpl
 import org.apache.spark._
+import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.internal.Logging
 import org.apache.spark.rdd.scheduler.{HDFSCacheTaskLocation, HostTaskLocation, SplitInfoReflections}
-import org.apache.spark.util.SerializableConfiguration
+import org.apache.spark.util.{SerializableConfiguration, ShutdownHookManager}
 
 import scala.collection.mutable.ArrayBuffer
 
 /**
   * Created by wangpengyu6 on 2017/7/15.
   */
-class HBaseRDD(sc: SparkContext,
-                                  tableNameString: String,
-                                  configuration: SerializableConfiguration,
-                                  size: Long) extends RDD[(ImmutableBytesWritable, Result)](sc, Nil) {
+class HBaseRDD(
+                sc: SparkContext,
+                tableNameString: String,
+                configuration: SerializableConfiguration,
+                val size: Long
+              ) extends RDD[(ImmutableBytesWritable, Result)](sc, Nil) {
   var tableRecordReader: TableRecordReader = _
-  private val confBroadcast = sc.broadcast(configuration)
   private val jobTrackerId: String = {
     val formatter = new SimpleDateFormat("yyyyMMddHHmmss", Locale.US)
     formatter.format(new Date())
   }
-  private val shouldCloneJobConf = sparkContext.getConf.getBoolean("spark.hadoop.cloneConf", false)
+  private val shouldCloneJobConf = sparkContext.getConf.getBoolean("spark.hadoop.cloneConf", defaultValue = false)
 
   def getConf: Configuration = {
-    val conf: Configuration = confBroadcast.value.value
+    val conf: Configuration = configuration.value
     if (shouldCloneJobConf) {
       HBaseRDD.CONFIGURATION_INSTANTIATION_LOCK.synchronized {
         logDebug("Cloning Hadoop Configuration")
@@ -99,6 +102,39 @@ class HBaseRDD(sc: SparkContext,
   override def compute(split: Partition, context: TaskContext): Iterator[(ImmutableBytesWritable, Result)] = {
     val iterator = new Iterator[(ImmutableBytesWritable, Result)] {
       val hbaseSplit = split.asInstanceOf[HBaseRegionPartition]
+
+      logInfo("Input split: " + hbaseSplit.serializableHadoopSplit)
+      private val inputMetrics = context.taskMetrics().inputMetrics
+      private val existingBytesRead = inputMetrics.bytesRead
+
+      // Sets InputFileBlockHolder for the file block's information
+      hbaseSplit.serializableHadoopSplit.value match {
+        case ts: TableSplit =>
+          InputFileBlockHolder.set(ts.getRegionLocation, 0L, ts.getLength)
+        case _ =>
+          InputFileBlockHolder.unset()
+      }
+
+      // Find a function that will return the FileSystem bytes read by this thread. Do this before
+      // creating RecordReader, because RecordReader's constructor might read some bytes
+      private val getBytesReadCallback: Option[() => Long] =
+      hbaseSplit.serializableHadoopSplit.value match {
+        case t: TableSplit =>
+          Some(() => t.getLength)
+        case _ => None
+      }
+
+      // We get our input bytes from thread-local Hadoop FileSystem statistics.
+      // If we do a coalesce, however, we are likely to compute multiple partitions in the same
+      // task and in the same thread, in which case we need to avoid override values written by
+      // previous partitions (SPARK-13071).
+      private def updateBytesRead(): Unit = {
+        getBytesReadCallback.foreach { getBytesRead =>
+          inputMetrics.setBytesRead(existingBytesRead + getBytesRead())
+        }
+      }
+
+
       private val _conf = getConf
       private val attemptId = new TaskAttemptID(jobTrackerId, id, TaskType.MAP, split.index, 0)
       private val hadoopAttemptContext = new TaskAttemptContextImpl(_conf, attemptId)
@@ -107,7 +143,10 @@ class HBaseRDD(sc: SparkContext,
       private var finished = false
       private var havePair = false
       // Register an on-task-completion callback to close the input stream.
-      context.addTaskCompletionListener(_ => close())
+      context.addTaskCompletionListener { _ =>
+        updateBytesRead()
+        close()
+      }
 
       override def hasNext: Boolean = {
         if (!finished && !havePair) {
@@ -136,19 +175,39 @@ class HBaseRDD(sc: SparkContext,
           throw new java.util.NoSuchElementException("End of stream")
         }
         havePair = false
+        if (!finished) {
+          inputMetrics.incRecordsRead(1)
+        }
+        if (inputMetrics.recordsRead % SparkHadoopUtil.UPDATE_INPUT_METRICS_INTERVAL_RECORDS == 0) {
+          updateBytesRead()
+        }
         (reader.getCurrentKey, reader.getCurrentValue)
       }
 
-
       private def close() = {
         if (reader != null) {
+          InputFileBlockHolder.unset()
           try {
             reader.close()
           } catch {
             case e: Exception =>
-              logWarning("Exception in RecordReader.close()", e)
+              if (!ShutdownHookManager.inShutdown()) {
+                logWarning("Exception in RecordReader.close()", e)
+              }
           } finally {
             reader = null
+          }
+          if (getBytesReadCallback.isDefined) {
+            updateBytesRead()
+          } else if (hbaseSplit.serializableHadoopSplit.value.isInstanceOf[TableSplit]) {
+            // If we can't get the bytes read from the FS stats, fall back to the split size,
+            // which may be inaccurate.
+            try {
+              inputMetrics.incBytesRead(hbaseSplit.serializableHadoopSplit.value.getLength)
+            } catch {
+              case e: java.io.IOException =>
+                logWarning("Unable to get input size to set InputMetrics for task", e)
+            }
           }
         }
       }
@@ -200,69 +259,103 @@ class HBaseRDD(sc: SparkContext,
           splitPair(i) = (splitStart, splitStop)
         }
       var index = 0
-      val parts = new ArrayBuffer[Partition]()
-      splitPair.foreach { indexPair =>
-        val splitStart = indexPair._1
-        val splitStop = indexPair._2
-        logDebug(s"split region: ============>(${Bytes.toString(splitStart)},${Bytes.toString(splitStop)})<============")
-        val regionLocation = regionLocator.getRegionLocation(splitStart)
-        val regionSize = regionSizeCalculator.getRegionSize(regionLocation.getRegionInfo.getRegionName)
-        if (regionSize > size) {
-          val num = (regionSize / size).toInt
-          val splitKeys = getSplitKey(splitStart, splitStop, num, isText)
-          for (i <- 0 until splitKeys.length - 1) {
-            logDebug(s"splitKey_$index: ------------>(${splitKeys(i).map(_.toChar).mkString},${splitKeys(i + 1).map(_.toChar).mkString})<------------")
-            parts += HBaseRegionPartition(index, new TableSplit(
-              tableName,
+      val parts = new ArrayBuffer[HBaseRegionPartition]()
+      splitPair.foreach {
+        indexPair =>
+          val splitStart = indexPair._1
+          val splitStop = indexPair._2
+          logDebug(s"split region: ============>(${
+            Bytes.toString(splitStart)
+          },${
+            Bytes.toString(splitStop)
+          })<============")
+          val regionLocation = regionLocator.getRegionLocation(splitStart)
+          val regionSize = regionSizeCalculator.getRegionSize(regionLocation.getRegionInfo.getRegionName)
+          if (regionSize > size * 1.2) {
+            val n = regionSize / size
+            val num = if (n > 1) n else n + 1
+
+            val splitKeys = getSplitKey(splitStart, splitStop, num.toInt, isText)
+            for (i <- 0 until splitKeys.length - 1) {
+              logInfo(s"splitKey_$index: ------------>(${
+                splitKeys(i).map(_.toChar).mkString
+              },${
+                splitKeys(i + 1).map(_.toChar).mkString
+              })<------------")
+              if (i < splitKeys.length - 2)
+                parts += HBaseRegionPartition(index, new TableSplit(
+                  tableName,
+                  scan,
+                  splitKeys(i),
+                  splitKeys(i + 1),
+                  regionLocation.getHostname,
+                  size
+                ))
+              else
+                parts += HBaseRegionPartition(index, new TableSplit(
+                  tableName,
+                  scan,
+                  splitKeys(i),
+                  splitKeys(i + 1),
+                  regionLocation.getHostname,
+                  regionSize - size * (i + 1)))
+              index += 1
+            }
+          }
+          else {
+            logInfo(s"SPLIT NO NEED:(${
+              Bytes.toString(splitStart)
+            }, ${
+              Bytes.toString(splitStop)
+            })")
+            parts += HBaseRegionPartition(index, new TableSplit(tableName,
               scan,
-              splitKeys(i),
-              splitKeys(i + 1),
+              splitStart,
+              splitStop,
               regionLocation.getHostname,
-              size
-            ))
+              regionSize))
             index += 1
           }
-        }
-        else {
-          logDebug(s"SPLIT NO NEED:(${Bytes.toString(splitStart)}, ${Bytes.toString(splitStop)})")
-          parts += HBaseRegionPartition(index, new TableSplit(tableName,
-            scan,
-            splitStart,
-            splitStop,
-            regionLocation.getHostname,
-            regionSize))
-          index += 1
-        }
-        parts
+          parts
       }
-      parts.toArray
+      parts.toArray.filter(_.split.getLength > 0)
+        .zipWithIndex.map {
+        case (s, i) => HBaseRegionPartition(i, s.split)
+      }.asInstanceOf[Array[Partition]]
     }
   }
 
-  private def getSplitKey(start: Array[Byte], end: Array[Byte], num: Int, isText: Boolean): Array[Array[Byte]] = {
+  private def getSplitKey(start: Array[Byte], stop: Array[Byte], num: Int, isText: Boolean): Array[Array[Byte]] = {
+    //后三位hash
     val splitKeys = new ArrayBuffer[Array[Byte]]()
-    val (upperLimitByte, lowerLimitByte): (Byte, Byte) = if (isText) ('~', ' ') else (-1, 0)
-    // For special case
-    // Example 1 : startkey=null, endkey="hhhqqqwww", splitKey="h"
-    // Example 2 (text key mode): startKey="ffffaaa", endKey=null, splitkey="f~~~~~~"
-    if (start.length == 0 && end.length == 0)
-      for (i <- 1 to num)
-        splitKeys += Array[Byte](((lowerLimitByte + upperLimitByte) / i).toByte)
-    else if (start.length == 0 && end.length != 0)
-      for (i <- 1 to num)
-        splitKeys += Array((end(0) / i).toByte)
-    else if (start.length != 0 && end.length == 0) {
-      splitKeys += start
-      for (i <- 1 to num) {
-        val result = new Array[Byte](start.length)
-        result(0) = (start(0) / i).toByte
-        for (k <- 1 until start.length) result(k) = upperLimitByte
-        splitKeys += result
+    splitKeys += start
+    val op = Bytes.toString(start)
+    val ed = Bytes.toString(stop)
+    val (startHash, stopHash) = (
+      (if (op.length >= 9)
+        op.substring(6, 9)
+      else
+        "000").toFloat,
+      (if (ed.length >= 9)
+        ed.substring(6, 9)
+      else
+        "999").toFloat
+    )
+    val splits = (if (startHash.toInt > stopHash.toInt) {
+      val c: Float = (stopHash + 1000 - startHash) / num
+      (1 until num).map {
+        n =>
+          val sp = (startHash + c * n).toInt
+          if (sp > 999)
+            ed.substring(0, 6) + (sp - 1000).formatted("%03d")
+          else
+            op.substring(0, 6) + sp.formatted("%03d")
       }
-    }
-    else Bytes.split(start, end, false, num).foreach(splitKeys += _)
-    /* if (Bytes.compareTo(splitKeys.last, end) < 0)
-       splitKeys += end*/
+    } else {
+      val c: Float = (stopHash - startHash) / num
+      (1 until num).map(n => op.substring(0, 6) + (startHash + c * n).toInt.formatted("%03d"))
+    }).foreach(s => splitKeys += Bytes.toBytes(s))
+    splitKeys += stop
     splitKeys.toArray
   }
 
@@ -326,4 +419,6 @@ object HBaseRDD extends Logging {
 
 case class HBaseRegionPartition(index: Int, @transient split: TableSplit) extends Partition {
   val serializableHadoopSplit = new SerializableWritable(split)
+
+  override def toString: String = s"index: [$index]" + split.toString
 }

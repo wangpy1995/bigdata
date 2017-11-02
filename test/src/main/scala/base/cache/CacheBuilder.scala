@@ -17,8 +17,8 @@ object CacheBuilder extends Logging {
   def buildCacheComponent[K, V](
                                  ss: SparkSession,
                                  className: String,
-                                 keyClass: Class[K],
-                                 valueClass: Class[V],
+                                 keyClass:Class[K],
+                                 valueClass:Class[V],
                                  options: Map[String, String] = Map.empty
                                ): Cache with CacheComponent[K, V] = lookupCreator(className).newInstance() match {
     case cc: CacheCreator[K,V] =>

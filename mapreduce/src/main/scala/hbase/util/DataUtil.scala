@@ -1,3 +1,4 @@
+/*
 package hbase.util
 
 import java.util.UUID
@@ -70,3 +71,4 @@ class DataUtil(sparkConf: SparkConf) extends Serializable with Logging {
     }
   }
 }
+*/

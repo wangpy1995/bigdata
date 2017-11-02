@@ -6,9 +6,9 @@ import base.cache.Cache
 import base.cache.components.CacheComponent
 import org.apache.curator.shaded.com.google.common.collect.MapMaker
 import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.RDDUtils
 
 import scala.collection.JavaConverters._
-import scala.reflect.ClassTag
 
 class RDDCache extends CacheComponent[String, RDD[_]]
   with Cache {
@@ -29,11 +29,13 @@ class RDDCache extends CacheComponent[String, RDD[_]]
         val newRDDs = values.map(_.cache())
         persistentValues.update(key, oldRDDs ::: newRDDs)
         newRDDs.foreach(_.checkpoint())
+        newRDDs.foreach(RDDUtils.saveDependency)
         newRDDs.foreach(c => println(c.count()))
       }
     } {
       val newRDDs = values.map(_.cache())
       persistentValues.put(key, newRDDs)
+      newRDDs.foreach(RDDUtils.saveDependency)
       newRDDs.foreach(_.checkpoint())
       newRDDs.foreach(c => println(c.count()))
     }
@@ -42,6 +44,7 @@ class RDDCache extends CacheComponent[String, RDD[_]]
   override def unCacheData(key: K): Unit = getOrElseNone(key) {
     srcRDD: List[V] => {
       srcRDD.foreach(_.unpersist())
+      srcRDD.foreach(RDDUtils.unCheckpoint)
       persistentValues.remove(key)
     }
   } {
